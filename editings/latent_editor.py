@@ -28,6 +28,26 @@ class LatentEditor:
 
         return edits, False
 
+    def get_amplification_edits(self, orig_w, edit_range, edit_layers=0):
+        edits = []
+        yaw = self.interfacegan_directions_tensors['yaw'][0].float()
+        pitch = self.interfacegan_directions_tensors['pitch'][0].float()
+        yaw /= torch.norm(yaw, 2)
+        pitch /= torch.norm(pitch, 2)
+        for factor in np.linspace(*edit_range):
+            w_edit = self._apply_amplification(orig_w, factor, yaw=yaw, pitch=pitch, edit_layers=edit_layers)
+            edits.append((w_edit, f'amplification_{edit_layers}', factor))
+
+        return edits, False
+
+    def get_amplification_edits_with_pose(self, orig_w, edit_range, edit_layers=0):
+        edits = []
+        for factor in np.linspace(*edit_range):
+            w_edit = self._apply_amplification_with_pose(orig_w, factor, edit_layers=edit_layers)
+            edits.append((w_edit, f'amplification_with_pose_{edit_layers}', factor))
+
+        return edits, False
+
     @staticmethod
     def get_styleclip_global_edits(orig_w, neutral_class, target_class, beta, edit_range, generator, edit_name, use_stylespace_std=False):
         affine_layers = get_affine_layers(generator.synthesis)
@@ -61,3 +81,37 @@ class LatentEditor:
         else:
             edit_latents = latent + factor * direction
         return edit_latents
+
+    @staticmethod
+    def _apply_amplification(latent, factor=2, yaw=None, pitch=None, edit_layers=0):
+        dist = latent[1:] - latent[0]
+        yaw_2d = yaw.reshape(yaw.shape[0], 1)
+        pitch_2d = pitch.reshape(pitch.shape[0], 1)
+
+        yaw_direction_vec = torch.matmul(dist, yaw_2d) * yaw
+        pitch_direction_vec = torch.matmul(dist, pitch_2d) * pitch
+        dist -= (yaw_direction_vec + pitch_direction_vec)
+
+        edit_latents = latent
+        if edit_layers <= 0:
+            edit_latents[1:, edit_layers:] += (factor - 1) * dist[:, edit_layers:]
+        else:
+            edit_latents[1:, :edit_layers] += (factor - 1) * dist[:, :edit_layers]
+
+
+        return edit_latents
+
+    @staticmethod
+    def _apply_amplification_with_pose(latent, factor=2, edit_layers=0):
+        dist = latent[1:] - latent[0]
+        edit_latents = latent
+        if edit_layers <= 0:
+            edit_latents[1:, edit_layers:] += (factor - 1) * dist[:, edit_layers:]
+        else:
+            edit_latents[1:, :edit_layers] += (factor - 1) * dist[:, :edit_layers]
+        return edit_latents
+
+    @staticmethod
+    def _save_latent(latent, name):
+        latent_np = latent.cpu().numpy()
+        np.save(name, latent_np)
