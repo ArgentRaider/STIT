@@ -82,12 +82,12 @@ def calc_masks(inversion, segmentation_model, border_pixels, inner_mask_dilation
 @click.option('-r', '--run_name', type=str, required=True)
 @click.option('--start_frame', type=int, default=0)
 @click.option('--end_frame', type=int, default=None)
-@click.option('--inner_mask_dilation', type=int, default=0)
-@click.option('--outer_mask_dilation', type=int, default=50)
+# @click.option('--inner_mask_dilation', type=int, default=0)
+# @click.option('--outer_mask_dilation', type=int, default=50)
 @click.option('-et', '--edit_type',
               type=click.Choice(['styleclip_global', 'interfacegan', 'amplification', 'amplification_with_pose'], case_sensitive=False),
               default='interfacegan')
-@click.option('--whole_image_border', is_flag=True, type=bool)
+# @click.option('--whole_image_border', is_flag=True, type=bool)
 @click.option('--beta', default=0.2, type=float)
 @click.option('--neutral_class', default='face', type=str)
 @click.option('--target_class', default=None, type=str)
@@ -100,17 +100,18 @@ def calc_masks(inversion, segmentation_model, border_pixels, inner_mask_dilation
 @click.option('--content_loss_lambda', type=float, default=0.01)
 @click.option('--border_loss_threshold', type=float, default=0.0)
 @click.option('--save_latent', type=bool, default=False)
-@click.option('--edit_layers', type=int, default=0)
+@click.option('--edit_layers_start', type=int, default=None)
+@click.option('--edit_layers_end', type=int, default=None)
 
 def main(**config):
     _main(**config, config=config)
 
 
 def _main(input_folder, output_folder, start_frame, end_frame, run_name,
-          edit_range, edit_type, edit_name, inner_mask_dilation,
-          outer_mask_dilation, whole_image_border,
+          edit_range, edit_type, edit_name, 
+        #   inner_mask_dilation, outer_mask_dilation, whole_image_border,
           freeze_fine_layers, l2, output_frames, num_steps, neutral_class, target_class,
-          beta, config, content_loss_lambda, border_loss_threshold, save_latent, edit_layers):
+          beta, config, content_loss_lambda, border_loss_threshold, save_latent, edit_layers_start, edit_layers_end):
 
     orig_files = make_dataset(input_folder)
     orig_files = orig_files[start_frame:end_frame]
@@ -134,10 +135,10 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
         json.dump(config, f)
 
     latent_editor = LatentEditor()
-    # # save original
-    # directory = f'latent/{run_name}/original/'
-    # if not os.path.exists(directory):
-    #     os.makedirs(directory)
+    # save original
+    directory = f'latent/{run_name}/original/'
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
     if edit_type == 'styleclip_global':
         edits, is_style_input = latent_editor.get_styleclip_global_edits(
@@ -145,10 +146,10 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
         )
     elif edit_type == 'amplification':
         edit_name='amplification'
-        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_range, edit_layers)
+        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_range, edit_layers_start, edit_layers_end)
     elif edit_type == 'amplification_with_pose':
         edit_name='amplification_with_pose'
-        edits, is_style_input = latent_editor.get_amplification_edits_with_pose(pivots, edit_range, edit_layers)
+        edits, is_style_input = latent_editor.get_amplification_edits_with_pose(pivots, edit_range, edit_layers_start)
     else:
         edits, is_style_input = latent_editor.get_interfacegan_edits(pivots, edit_name, edit_range)
     
@@ -164,7 +165,7 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
         video_frames = defaultdict(list)
         for i, (orig_image, crop, quad, inverse_transform) in \
                 tqdm(enumerate(zip(orig_images, crops, quads, inverse_transforms)), total=len(orig_images)):
-            w_interp = pivots[i][None]
+            # w_interp = pivots[i][None]
             if is_style_input:
                 w_edit_interp = [style[i][None] for style in edits_list]
             else:
@@ -172,27 +173,30 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
 
             edited_tensor = gen.synthesis.forward(w_edit_interp, style_input=is_style_input, noise_mode='const',
                                                   force_fp32=True)
+            edited_image = tensor2pil(edited_tensor)
 
-            inversion = gen.synthesis(w_interp, noise_mode='const', force_fp32=True)
-            border_pixels = outer_mask_dilation
+            # inversion = gen.synthesis(w_interp, noise_mode='const', force_fp32=True)
+            # border_pixels = outer_mask_dilation
 
-            crop_tensor = to_tensor(crop)[None].mul(2).sub(1).cuda()
-            content_mask, border_mask, full_mask = calc_masks(crop_tensor, segmentation_model, border_pixels,
-                                                              inner_mask_dilation, outer_mask_dilation,
-                                                              whole_image_border)
-            inversion = tensor2pil(inversion)
-            inversion_projection = paste_image(inverse_transform, inversion, orig_image)
+            # crop_tensor = to_tensor(crop)[None].mul(2).sub(1).cuda()
+            # content_mask, border_mask, full_mask = calc_masks(crop_tensor, segmentation_model, border_pixels,
+            #                                                   inner_mask_dilation, outer_mask_dilation,
+            #                                                   whole_image_border)
+            # inversion = tensor2pil(inversion)
+            # inversion_projection = paste_image(inverse_transform, inversion, orig_image)
 
-            optimized_tensor = optimize_border(gen, crop_tensor, edited_tensor,
-                                               w_edit_interp, border_mask=border_mask, content_mask=content_mask,
-                                               optimize_generator=True, num_steps=num_steps, loss_l2=l2,
-                                               is_style_input=is_style_input, content_loss_lambda=content_loss_lambda,
-                                               border_loss_threshold=border_loss_threshold)
+            # optimized_tensor = optimize_border(gen, crop_tensor, edited_tensor,
+            #                                    w_edit_interp, border_mask=border_mask, content_mask=content_mask,
+            #                                    optimize_generator=True, num_steps=num_steps, loss_l2=l2,
+            #                                    is_style_input=is_style_input, content_loss_lambda=content_loss_lambda,
+            #                                    border_loss_threshold=border_loss_threshold)
 
-            video_frames[f'optimized_edits/{direction}/{factor}'].append(
-                tensor2pil(optimized_tensor)
+            # video_frames[f'optimized_edits/{direction}/{factor}'].append(
+            video_frames[f'direct_edits/{direction}/{factor}'].append(
+                # tensor2pil(optimized_tensor)
+                edited_image
             )
-
+        '''
             optimized_image = tensor2pil(optimized_tensor)
             edited_image = tensor2pil(edited_tensor)
 
@@ -258,7 +262,7 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
                                               inverse_transform, optimized_image, orig_image, quad, edited_image)
                 os.makedirs(os.path.join(output_folder, 'dumps', folder_name), exist_ok=True)
                 torch.save(frame_data, os.path.join(output_folder, 'dumps', folder_name, f'{i}.pt'))
-
+        '''
         for folder_name, frames in video_frames.items():
             folder_path = os.path.join(output_folder, folder_name)
             os.makedirs(folder_path, exist_ok=True)
