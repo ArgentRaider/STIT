@@ -154,5 +154,10 @@ cython_debug/
 
 .idea
 
-# Video data
+# data
 data/
+training_results/
+edits/
+latent/
+pretrained_models/
+checkpoints/
