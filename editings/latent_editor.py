@@ -39,6 +39,25 @@ class LatentEditor:
             edits.append((w_edit, f'amplification_{edit_layers_start}_{edit_layers_end}', factor))
 
         return edits, False
+    
+    def get_transfer_edits(self, transfer_src_w, transfer_dst_w_list, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
+        edits = []
+        for transfer_dst_w in transfer_dst_w_list:
+            w_edit = self._apply_transfer(transfer_src_w, transfer_dst_w, edit_layers_start, edit_layers_end, mean_pivot)
+            edits.append((w_edit, f'transfer_{edit_layers_start}_{edit_layers_end}', 1))
+
+        return edits, False
+    
+    def get_removal_edits(self, orig_w, edit_names, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
+        edits = []
+        for edit_name, direction in self.interfacegan_directions_tensors.items():
+            if edit_name not in edit_names:
+                continue
+            direction = direction[0]
+            w_edit = self._apply_removal(orig_w, direction, edit_layers_start, edit_layers_end, mean_pivot)
+            edits.append((w_edit, f'removal_{edit_name}_{edit_layers_start}_{edit_layers_end}', -1))
+
+        return edits, False
 
     def get_amplification_edits_with_pose(self, orig_w, edit_range, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
         edits = []
@@ -122,6 +141,38 @@ class LatentEditor:
             dist = latent - mean
             edit_latents = latent.clone()
             edit_latents[:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
+        return edit_latents
+    
+    @staticmethod
+    def _apply_transfer(src_latent, dst_latent, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
+        if mean_pivot:
+            src_origin = src_latent.mean(0).unsqueeze(0)
+            dst_origin = dst_latent.mean(0).unsqueeze(0)
+        else:
+            src_origin = src_latent[0, None]
+            dst_origin = dst_latent[0, None]
+        
+        src_dist = src_latent - src_origin
+        edit_latents = dst_origin.repeat(src_dist.shape[0], 1, 1)
+        edit_latents[:, edit_layers_start:edit_layers_end] += src_dist[:, edit_layers_start:edit_layers_end]
+
+        return edit_latents
+    
+    @staticmethod
+    def _apply_removal(latent, direction, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
+        if mean_pivot:
+            origin = latent.mean(0).unsqueeze(0)
+        else:
+            origin = latent[0, None]
+        
+        dist = latent - origin
+        remove_direction_2d = direction.reshape(direction.shape[0], 1)
+        remove_direction_vec = torch.matmul(dist, remove_direction_2d) * direction
+        dist -= remove_direction_vec
+
+        edit_latents = origin.repeat(dist.shape[0], 1, 1)
+        edit_latents[:, edit_layers_start:edit_layers_end] += dist[:, edit_layers_start:edit_layers_end]
+
         return edit_latents
 
     @staticmethod
