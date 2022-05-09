@@ -30,68 +30,63 @@ from utils.morphology import dilation
 from UI import UI
 
 @click.command()
-@click.option('-r', '--run_name', type=str, required=True)
+@click.option('-rs', '--run_name_src', type=str, required=True)
+@click.option('-rd', '--run_name_dst', type=str, required=True)
 @click.option('--edit_layers_start', type=int, default=0)
 @click.option('--edit_layers_end', type=int, default=18)
 
 
-def _main(run_name, edit_layers_start, edit_layers_end):
+def _main(run_name_src, run_name_dst, edit_layers_start, edit_layers_end):
     image_size = 1024
-    input_folder = f'data/{run_name}'
-    orig_files = make_dataset(input_folder)
+    input_folder_src = f'data/{run_name_src}'
+    orig_files_src = make_dataset(input_folder_src)
+    input_folder_dst = f'data/{run_name_dst}'
+    orig_files_dst = make_dataset(input_folder_dst)
     segmentation_model = models.seg_model_2.BiSeNet(19).eval().cuda().requires_grad_(False)
     segmentation_model.load_state_dict(torch.load(paths_config.segmentation_model_path))
 
-    gen, orig_gen, pivots, quads = load_generators(run_name)
-    ## The unedited images could be pre-generated, yet they consume too much memory...
-    # gen_images = []
-    # for fi in range(len(pivots)):
-    #     gen_image = gen.synthesis(pivots[fi][None], noise_mode='const', force_fp32=True)
-    #     gen_images.append(tensor2pil(gen_image))
-
-    crops, orig_images = crop_faces_by_quads(image_size, orig_files, quads)
+    gen_src, _, pivots_src, quads_src = load_generators(run_name_src)
+    crops_src, orig_images_src = crop_faces_by_quads(image_size, orig_files_src, quads_src)
+    gen_dst, _, pivots_dst, quads_dst = load_generators(run_name_dst)
+    crops_dst, orig_images_dst = crop_faces_by_quads(image_size, orig_files_dst, quads_dst)
 
     latent_editor = LatentEditor()
-    ui = UI(windowName=f'Amplification-{run_name}')
+    ui = UI(windowName=f'Transfer-{run_name_src}-{run_name_dst}')
 
     fi = 0
-    scale = 2
     is_playing = False
     use_mean = False
     window_should_close = False
     while not window_should_close:
         # print(fi)
         
-        edit_range = (scale,scale,1)
-        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_range, edit_layers_start, edit_layers_end, use_mean)
+        edits, is_style_input = latent_editor.get_transfer_edits(pivots_src, [pivots_dst], edit_layers_start, edit_layers_end, use_mean)
 
         edits_list, direction, factor = edits[0]
 
-        orig_tensor = gen.synthesis(pivots[fi][None], noise_mode='const', force_fp32=True)
-        orig_image = tensor2pil(orig_tensor)
+        src_tensor = gen_src.synthesis(pivots_src[fi][None], noise_mode='const', force_fp32=True)
+        src_image = tensor2pil(src_tensor)
         # orig_image = crops[fi]
         
-        w_edit_interp = edits_list[fi][None]
-        edited_tensor = gen.synthesis.forward(w_edit_interp, style_input=False, noise_mode='const',
+        w_transfer = edits_list[fi][None]
+        transferred_tensor = gen_dst.synthesis.forward(w_transfer, style_input=False, noise_mode='const',
                                                 force_fp32=True)
-        edited_image = tensor2pil(edited_tensor)
+        transferred_image = tensor2pil(transferred_tensor)        
 
-        edited_image = np.array(edited_image)[:, :, ::-1]
-        edited_image = cv2.resize(edited_image, (512, 512))
-
-        orig_image = np.array(orig_image)[:, :, ::-1]
-        orig_image = cv2.resize(orig_image, (512, 512))
+        src_image = np.array(src_image)[:, :, ::-1]
+        src_image = cv2.resize(src_image, (512, 512))
+        transferred_image = np.array(transferred_image)[:, :, ::-1]
+        transferred_image = cv2.resize(transferred_image, (512, 512))
 
         textList = []
         textList.append(f'Frame: {fi}')
-        textList.append(f'Scale: {scale}')
         textList.append(f'Edit Layers: {edit_layers_start}-{edit_layers_end}')
         if not use_mean:
             textList.append('First or Mean: First')
         else:
             textList.append('First or Mean: Mean')
 
-        ui.display(textList, orig_image, edited_image)
+        ui.display(textList, src_image, transferred_image)
 
         if is_playing:
             ret = cv2.waitKey(1000/25)
@@ -111,12 +106,8 @@ def _main(run_name, edit_layers_start, edit_layers_end):
         elif ret == 120: # 'x'
             is_playing = False
             fi += 1
-            if fi >= len(pivots):
-                fi = len(pivots) - 1
-        elif ret == 113: # 'q'
-            scale -= 0.1
-        elif ret == 101: # 'e'
-            scale += 0.1
+            if fi >= len(pivots_src):
+                fi = len(pivots_src) - 1
         elif ret == 97:  # 'a'
             edit_layers_start -= 1
             if edit_layers_start < 0:
@@ -138,14 +129,14 @@ def _main(run_name, edit_layers_start, edit_layers_end):
         elif ret == 112: # 'p' export video
             # maybe I should also write the config to a json file or something
             export_path = 'export_videos/'
-            export_name = f'amplification_{run_name}.mp4'
+            export_name = f'transfer_{run_name_src}_{run_name_dst}.mp4'
             if not os.path.exists(export_path):
                 os.makedirs(export_path)
             
             frames = []
-            for fj in tqdm(range(len(pivots))):
-                orig_frame = tensor2pil( gen.synthesis(pivots[fj][None], noise_mode='const', force_fp32=True) )
-                edited_frame = tensor2pil( gen.synthesis.forward(edits_list[fj][None], style_input=False, noise_mode='const', force_fp32=True) )
+            for fj in tqdm(range(len(pivots_src))):
+                orig_frame = tensor2pil( gen_src.synthesis(pivots_src[fj][None], noise_mode='const', force_fp32=True) )
+                edited_frame = tensor2pil( gen_dst.synthesis.forward(edits_list[fj][None], style_input=False, noise_mode='const', force_fp32=True) )
                 orig_frame = orig_frame.resize((512, 512))
                 edited_frame = edited_frame.resize((512, 512))
                 new_frame = Image.new(orig_frame.mode, (1024, 512))
@@ -157,8 +148,8 @@ def _main(run_name, edit_layers_start, edit_layers_end):
 
         if is_playing: # inactive feature for now
             fi += 1
-            if fi >= len(pivots):
-                fi = len(pivots) - 1
+            if fi >= len(pivots_src):
+                fi = len(pivots_src) - 1
 
 
 if __name__ == "__main__":

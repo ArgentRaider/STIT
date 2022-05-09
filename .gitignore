@@ -161,3 +161,4 @@ edits/
 latent/
 pretrained_models/
 checkpoints/
+export_videos/
