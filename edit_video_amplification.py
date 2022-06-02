@@ -80,6 +80,7 @@ def calc_masks(inversion, segmentation_model, border_pixels, inner_mask_dilation
 @click.option('-i', '--input_folder', type=str, help='Path to (unaligned) images folder', required=True)
 @click.option('-o', '--output_folder', type=str, help='Path to output folder', required=True)
 @click.option('-r', '--run_name', type=str, required=True)
+@click.option('--input_crop', type=bool, default=False, help='Path to (unaligned) images folder')
 @click.option('--start_frame', type=int, default=0)
 @click.option('--end_frame', type=int, default=None)
 # @click.option('--inner_mask_dilation', type=int, default=0)
@@ -95,6 +96,7 @@ def calc_masks(inversion, segmentation_model, border_pixels, inner_mask_dilation
 @click.option('-er', '--edit_range', type=(float, float, int), nargs=3, default=(2, 20, 10))
 @click.option('--freeze_fine_layers', type=int, default=None)
 @click.option('--l2/--l1', type=bool, default=True)
+@click.option('--output_video', type=bool, default=True)
 @click.option('--output_frames', type=bool, is_flag=True, default=False)
 @click.option('--num_steps', type=int, default=100)
 @click.option('--content_loss_lambda', type=float, default=0.01)
@@ -102,26 +104,35 @@ def calc_masks(inversion, segmentation_model, border_pixels, inner_mask_dilation
 @click.option('--save_latent', type=bool, default=False)
 @click.option('--edit_layers_start', type=int, default=None)
 @click.option('--edit_layers_end', type=int, default=None)
+@click.option('--min_exp_weight_path', type=str, default=None)
 
 def main(**config):
     _main(**config, config=config)
 
 
-def _main(input_folder, output_folder, start_frame, end_frame, run_name,
+def _main(input_folder, output_folder, start_frame, end_frame, run_name, input_crop,
           edit_range, edit_type, edit_name, 
         #   inner_mask_dilation, outer_mask_dilation, whole_image_border,
-          freeze_fine_layers, l2, output_frames, num_steps, neutral_class, target_class,
-          beta, config, content_loss_lambda, border_loss_threshold, save_latent, edit_layers_start, edit_layers_end):
-
-    orig_files = make_dataset(input_folder)
-    orig_files = orig_files[start_frame:end_frame]
-    segmentation_model = models.seg_model_2.BiSeNet(19).eval().cuda().requires_grad_(False)
-    segmentation_model.load_state_dict(torch.load(paths_config.segmentation_model_path))
+          freeze_fine_layers, l2, output_video, output_frames, num_steps, neutral_class, target_class,
+          beta, config, content_loss_lambda, border_loss_threshold, save_latent, edit_layers_start, edit_layers_end,
+          min_exp_weight_path):
 
     gen, orig_gen, pivots, quads = load_generators(run_name)
+    orig_files = make_dataset(input_folder)
+    orig_files = orig_files[start_frame:end_frame]
     image_size = 1024
 
-    crops, orig_images = crop_faces_by_quads(image_size, orig_files, quads)
+    if not input_crop:
+        segmentation_model = models.seg_model_2.BiSeNet(19).eval().cuda().requires_grad_(False)
+        segmentation_model.load_state_dict(torch.load(paths_config.segmentation_model_path))
+        crops, orig_images = crop_faces_by_quads(image_size, orig_files, quads)
+    else:
+        orig_images = []
+        crops = []
+        for (_, path) in orig_files:
+            orig_image = Image.open(path)
+            orig_images.append(orig_image)
+            crops.append(orig_image)
 
     inverse_transforms = [
         calc_alignment_coefficients(quad + 0.5, [[0, 0], [0, image_size], [image_size, image_size], [image_size, 0]])
@@ -131,22 +142,35 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
         pivots = torch.cat([pivots[:, :freeze_fine_layers], pivots_mean[:, freeze_fine_layers:]], dim=1)
 
     os.makedirs(output_folder, exist_ok=True)
-    with open(os.path.join(output_folder, 'opts.json'), 'w') as f:
-        json.dump(config, f)
+    # with open(os.path.join(output_folder, 'opts.json'), 'w') as f:
+    #     json.dump(config, f)
 
     latent_editor = LatentEditor()
     # save original
-    directory = f'latent/{run_name}/original/'
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    # directory = f'latent/{run_name}/original/'
+    # if not os.path.exists(directory):
+    #     os.makedirs(directory)
 
     if edit_type == 'styleclip_global':
         edits, is_style_input = latent_editor.get_styleclip_global_edits(
             pivots, neutral_class, target_class, beta, edit_range, gen, edit_name
         )
     elif edit_type == 'amplification':
-        edit_name='amplification'
-        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_range, edit_layers_start, edit_layers_end)
+        edit_name = edit_name[0]
+        if edit_name == 'mean':
+            origin_pivot_type={'type': 'mean'}
+        elif edit_name == 'first':
+            origin_pivot_type={'type': 'first'}
+        elif edit_name == 'min':
+            origin_pivot_type={'type': 'min'}
+            min_index = np.load(min_exp_weight_path)['min_index']
+            origin_pivot_type['min_index'] = min_index
+        elif edit_name == 'min_weight':
+            origin_pivot_type={'type': 'min_weight'}
+            weight = np.load(min_exp_weight_path)['weight']
+            origin_pivot_type['weight'] = weight
+
+        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_range, edit_layers_start, edit_layers_end, origin_pivot_type=origin_pivot_type)
     elif edit_type == 'amplification_with_pose':
         edit_name='amplification_with_pose'
         edits, is_style_input = latent_editor.get_amplification_edits_with_pose(pivots, edit_range, edit_layers_start)
@@ -192,10 +216,18 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
             #                                    border_loss_threshold=border_loss_threshold)
 
             # video_frames[f'optimized_edits/{direction}/{factor}'].append(
-            video_frames[f'direct_edits/{direction}/{factor}'].append(
+            video_frames[f'direct_edits/{direction}'].append(
                 # tensor2pil(optimized_tensor)
                 edited_image
             )
+            video_frames[f'original'].append(crop)
+            if output_frames:
+                # folder_name = f'{run_name}_{edit_type}_{factor}_{edit_name}_{edit_layers_start}_{edit_layers_end}'
+                # frames_dir = os.path.join(output_folder, folder_name)
+                frames_dir = output_folder
+                os.makedirs(frames_dir, exist_ok=True)
+                save_image(edited_image, os.path.join(frames_dir, f'edit_{i:04d}.jpeg'))
+
         '''
             optimized_image = tensor2pil(optimized_tensor)
             edited_image = tensor2pil(edited_tensor)
@@ -263,10 +295,13 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
                 os.makedirs(os.path.join(output_folder, 'dumps', folder_name), exist_ok=True)
                 torch.save(frame_data, os.path.join(output_folder, 'dumps', folder_name, f'{i}.pt'))
         '''
-        for folder_name, frames in video_frames.items():
-            folder_path = os.path.join(output_folder, folder_name)
-            os.makedirs(folder_path, exist_ok=True)
-            imageio.mimwrite(os.path.join(folder_path, 'out.mp4'), frames, fps=18, output_params=['-vf', 'fps=25'])
+        if output_video:
+            for folder_name, frames in video_frames.items():
+                folder_path = os.path.join(output_folder, folder_name)
+                os.makedirs(folder_path, exist_ok=True)
+                imageio.mimwrite(os.path.join(folder_path, 'out.mp4'), frames, fps=18, output_params=['-vf', 'fps=25'])
+        
+
 
 
 def create_dump_file(border_mask_image, crop, full_mask_image, inner_mask_image, inverse_transform, optimized_image,

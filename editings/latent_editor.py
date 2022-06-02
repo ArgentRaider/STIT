@@ -28,41 +28,47 @@ class LatentEditor:
 
         return edits, False
 
-    def get_amplification_edits(self, orig_w, edit_range, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
+    def get_amplification_edits(self, orig_w, edit_range, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
+        assert(type(origin_pivot_type) == dict and origin_pivot_type.get('type') in ['first', 'mean', 'min', 'min_weight'])
+
         edits = []
         yaw = self.interfacegan_directions_tensors['yaw'][0].float()
         pitch = self.interfacegan_directions_tensors['pitch'][0].float()
         yaw /= torch.norm(yaw, 2)
         pitch /= torch.norm(pitch, 2)
         for factor in np.linspace(*edit_range):
-            w_edit = self._apply_amplification(orig_w, factor, yaw=yaw, pitch=pitch, edit_layers_start=edit_layers_start, edit_layers_end=edit_layers_end, mean_pivot=mean_pivot)
-            edits.append((w_edit, f'amplification_{edit_layers_start}_{edit_layers_end}', factor))
+            w_edit = self._apply_amplification(orig_w, factor, yaw=yaw, pitch=pitch, edit_layers_start=edit_layers_start, edit_layers_end=edit_layers_end, origin_pivot_type=origin_pivot_type)
+            edits.append((w_edit, f'amplification_{edit_layers_start}_{edit_layers_end}_{factor}', factor))
 
         return edits, False
     
-    def get_transfer_edits(self, transfer_src_w, transfer_dst_w_list, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
+    def get_transfer_edits(self, transfer_src_w, transfer_dst_w_list, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
+        assert(type(origin_pivot_type) == dict and origin_pivot_type.get('type') in ['first', 'mean', 'min', 'min_weight'])
+
         edits = []
         for transfer_dst_w in transfer_dst_w_list:
-            w_edit = self._apply_transfer(transfer_src_w, transfer_dst_w, edit_layers_start, edit_layers_end, mean_pivot)
+            w_edit = self._apply_transfer(transfer_src_w, transfer_dst_w, edit_layers_start, edit_layers_end, origin_pivot_type)
             edits.append((w_edit, f'transfer_{edit_layers_start}_{edit_layers_end}', 1))
 
         return edits, False
     
-    def get_removal_edits(self, orig_w, edit_names, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
+    def get_removal_edits(self, orig_w, edit_names, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
+        assert(type(origin_pivot_type) == dict and origin_pivot_type.get('type') in ['first', 'mean', 'min', 'min_weight'])
+
         edits = []
         for edit_name, direction in self.interfacegan_directions_tensors.items():
             if edit_name not in edit_names:
                 continue
             direction = direction[0]
-            w_edit = self._apply_removal(orig_w, direction, edit_layers_start, edit_layers_end, mean_pivot)
+            w_edit = self._apply_removal(orig_w, direction, edit_layers_start, edit_layers_end, origin_pivot_type)
             edits.append((w_edit, f'removal_{edit_name}_{edit_layers_start}_{edit_layers_end}', -1))
 
         return edits, False
 
-    def get_amplification_edits_with_pose(self, orig_w, edit_range, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
+    def get_amplification_edits_with_pose(self, orig_w, edit_range, edit_layers_start=None, edit_layers_end=None, origin_pivot_type=False):
         edits = []
         for factor in np.linspace(*edit_range):
-            w_edit = self._apply_amplification_with_pose(orig_w, factor, edit_layers_start=edit_layers_start, edit_layers_end=edit_layers_end, mean_pivot=mean_pivot)
+            w_edit = self._apply_amplification_with_pose(orig_w, factor, edit_layers_start=edit_layers_start, edit_layers_end=edit_layers_end, origin_pivot_type=origin_pivot_type)
             edits.append((w_edit, f'amplification_with_pose_{edit_layers_start}_{edit_layers_end}', factor))
 
         return edits, False
@@ -102,55 +108,80 @@ class LatentEditor:
         return edit_latents
 
     @staticmethod
-    def _apply_amplification(latent, factor=2, yaw=None, pitch=None, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
-        if not mean_pivot:
-            dist = latent[1:] - latent[0]
-            yaw_2d = yaw.reshape(yaw.shape[0], 1)
-            pitch_2d = pitch.reshape(pitch.shape[0], 1)
+    def _apply_amplification(latent, factor=2, yaw=None, pitch=None, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
+        if origin_pivot_type['type'] == 'mean':
+            origin = latent.mean(0).unsqueeze(0)
+        elif origin_pivot_type['type'] == 'first':
+            origin = latent[0, None]
+        elif origin_pivot_type['type'] == 'min':
+            min_index = origin_pivot_type['min_index']
+            origin = latent[min_index, None]
+        elif origin_pivot_type['type'] == 'min_weight':
+            weight = origin_pivot_type['weight']
+            origin = torch.zeros([latent.shape[1], latent.shape[2]]).float().cuda()
+            for i in range(len(weight)):
+                origin += weight[i] * latent[i]
+            origin.unsqueeze(0)
 
-            yaw_direction_vec = torch.matmul(dist, yaw_2d) * yaw
-            pitch_direction_vec = torch.matmul(dist, pitch_2d) * pitch
-            dist -= (yaw_direction_vec + pitch_direction_vec)
+        dist = latent - origin
+        yaw_2d = yaw.reshape(yaw.shape[0], 1)
+        pitch_2d = pitch.reshape(pitch.shape[0], 1)
 
-            edit_latents = latent.clone()
-            edit_latents[1:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
-        else:
-            mean = latent.mean(0)
-            dist = latent - mean
-            yaw_2d = yaw.reshape(yaw.shape[0], 1)
-            pitch_2d = pitch.reshape(pitch.shape[0], 1)
+        yaw_direction_vec = torch.matmul(dist, yaw_2d) * yaw
+        pitch_direction_vec = torch.matmul(dist, pitch_2d) * pitch
+        dist -= (yaw_direction_vec + pitch_direction_vec)
 
-            yaw_direction_vec = torch.matmul(dist, yaw_2d) * yaw
-            pitch_direction_vec = torch.matmul(dist, pitch_2d) * pitch
-            dist -= (yaw_direction_vec + pitch_direction_vec)
-
-            
-            edit_latents = latent.clone()
-            edit_latents[:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
+        edit_latents = latent.clone()
+        edit_latents[:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
 
         return edit_latents
 
     @staticmethod
-    def _apply_amplification_with_pose(latent, factor=2, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
-        if not mean_pivot:
-            dist = latent[1:] - latent[0]
-            edit_latents = latent.clone()
-            edit_latents[1:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
-        else:
-            mean = latent.mean(0)
-            dist = latent - mean
-            edit_latents = latent.clone()
-            edit_latents[:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
+    def _apply_amplification_with_pose(latent, factor=2, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
+        if origin_pivot_type['type'] == 'mean':
+            origin = latent.mean(0).unsqueeze(0)
+        elif origin_pivot_type['type'] == 'first':
+            origin = latent[0, None]
+        elif origin_pivot_type['type'] == 'min':
+            min_index = origin_pivot_type['min_index']
+            origin = latent[min_index, None]
+        elif origin_pivot_type['type'] == 'min_weight':
+            weight = origin_pivot_type['weight']
+            origin = torch.zeros([latent.shape[1], latent.shape[2]]).float().cuda()
+            for i in range(len(weight)):
+                origin += weight[i] * latent[i]
+            origin.unsqueeze(0)
+
+        dist = latent - origin
+        edit_latents = latent.clone()
+        edit_latents[:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
+            
         return edit_latents
     
     @staticmethod
-    def _apply_transfer(src_latent, dst_latent, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
-        if mean_pivot:
+    def _apply_transfer(src_latent, dst_latent, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
+        if origin_pivot_type['type'] == 'mean':
             src_origin = src_latent.mean(0).unsqueeze(0)
             dst_origin = dst_latent.mean(0).unsqueeze(0)
-        else:
+        elif origin_pivot_type['type'] == 'first':
             src_origin = src_latent[0, None]
             dst_origin = dst_latent[0, None]
+        elif origin_pivot_type['type'] == 'min':
+            src_min_index = origin_pivot_type['src_min_index']
+            dst_min_index = origin_pivot_type['dst_min_index']
+            src_origin = src_latent[src_min_index, None]
+            dst_origin = dst_latent[dst_min_index, None]
+        elif origin_pivot_type['type'] == 'min_weight':
+            src_weight = origin_pivot_type['src_weight']
+            dst_weight = origin_pivot_type['dst_weight']
+            src_origin = torch.zeros([src_latent.shape[1], src_latent.shape[2]]).float().cuda()
+            dst_origin = torch.zeros([dst_latent.shape[1], dst_latent.shape[2]]).float().cuda()
+            for i in range(len(src_weight)):
+                src_origin += src_weight[i] * src_latent[i]
+            for i in range(len(dst_weight)):
+                dst_origin += dst_weight[i] * dst_latent[i]
+            src_origin.unsqueeze(0)
+            dst_origin.unsqueeze(0)
         
         src_dist = src_latent - src_origin
         edit_latents = dst_origin.repeat(src_dist.shape[0], 1, 1)
@@ -159,11 +190,20 @@ class LatentEditor:
         return edit_latents
     
     @staticmethod
-    def _apply_removal(latent, direction, edit_layers_start=None, edit_layers_end=None, mean_pivot=False):
-        if mean_pivot:
+    def _apply_removal(latent, direction, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
+        if origin_pivot_type['type'] == 'mean':
             origin = latent.mean(0).unsqueeze(0)
-        else:
+        elif origin_pivot_type['type'] == 'first':
             origin = latent[0, None]
+        elif origin_pivot_type['type'] == 'min':
+            min_index = origin_pivot_type['min_index']
+            origin = latent[min_index, None]
+        elif origin_pivot_type['type'] == 'min_weight':
+            weight = origin_pivot_type['weight']
+            origin = torch.zeros([latent.shape[1], latent.shape[2]]).float().cuda()
+            for i in range(len(weight)):
+                origin += weight[i] * latent[i]
+            origin.unsqueeze(0)
         
         dist = latent - origin
         remove_direction_2d = direction.reshape(direction.shape[0], 1)

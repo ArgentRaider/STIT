@@ -156,9 +156,13 @@ cython_debug/
 
 # data
 data/
+data_crop/
 training_results/
 edits/
 latent/
 pretrained_models/
 checkpoints/
 export_videos/
+data_crop_codes/
+rand_data/
+PCA_analysis/
