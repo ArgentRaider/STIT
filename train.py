@@ -1,3 +1,4 @@
+from email.policy import default
 import json
 
 from tqdm import tqdm
@@ -17,7 +18,7 @@ from PIL import Image
 from torchvision import transforms
 
 from configs import paths_config, global_config, hyperparameters
-from utils.alignment import crop_faces, calc_alignment_coefficients
+from utils.alignment import crop_faces, calc_alignment_coefficients, crop_faces_by_quads
 
 
 def save_image(image: Image.Image, output_folder, image_name, image_index, ext='jpg'):
@@ -41,6 +42,17 @@ def to_pil_image(tensor: torch.Tensor) -> Image.Image:
     x = np.rint(x).clip(0, 255).astype(np.uint8)
     return Image.fromarray(x)
 
+def get_orig_crop(files):
+    crops = []
+    for _, filepath in tqdm(files):
+        if isinstance(filepath, Image.Image):
+            img = filepath
+        else:
+            img = Image.open(filepath)
+            w, h = img.size
+            crops.append(np.array([[0, 0], [0, h-1], [w-1, h-1], [w-1, 0]]))
+    return crops
+
 
 @click.command()
 @click.option('-i', '--input_folder', type=str, help='Path to (unaligned) images folder', required=True)
@@ -48,6 +60,7 @@ def to_pil_image(tensor: torch.Tensor) -> Image.Image:
 @click.option('--start_frame', type=int, default=0)
 @click.option('--end_frame', type=int, default=None)
 @click.option('-r', '--run_name', type=str, required=True)
+@click.option('--crop', default=True, type=bool)
 @click.option('--use_fa/--use_dlib', default=False, type=bool)
 @click.option('--scale', default=1.0, type=float)
 @click.option('--num_pti_steps', default=300, type=int)
@@ -62,7 +75,7 @@ def main(**config):
     _main(**config, config=config)
 
 
-def _main(input_folder, output_folder, start_frame, end_frame, run_name,
+def _main(input_folder, output_folder, start_frame, end_frame, run_name, crop,
           scale, num_pti_steps, l2_lambda, center_sigma, xy_sigma,
           use_fa, use_locality_reg, use_wandb, config, pti_learning_rate, pti_adam_beta1):
     global_config.run_name = run_name
@@ -77,10 +90,15 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name,
     files = files[start_frame:end_frame]
     print(f'Number of images: {len(files)}')
     image_size = 1024
-    print('Aligning images')
-    crops, orig_images, quads = crop_faces(image_size, files, scale,
-                                           center_sigma=center_sigma, xy_sigma=xy_sigma, use_fa=use_fa)
-    print('Aligning completed')
+
+    if crop:
+        print('Aligning images')
+        crops, orig_images, quads = crop_faces(image_size, files, scale,
+                                            center_sigma=center_sigma, xy_sigma=xy_sigma, use_fa=use_fa)
+        print('Aligning completed')
+    else:
+        quads = get_orig_crop(files)
+        crops, orig_images = crop_faces_by_quads(image_size, files, quads)
 
 
     ds = ImageListDataset(crops, transforms.Compose([

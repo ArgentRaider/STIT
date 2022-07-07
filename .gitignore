@@ -162,7 +162,12 @@ edits/
 latent/
 pretrained_models/
 checkpoints/
+export_images/
 export_videos/
 data_crop_codes/
 rand_data/
 PCA_analysis/
+w_vectors/
+
+# deprecated components
+latent_mapping/

@@ -25,20 +25,29 @@ class e4e_inversion_module:
         _, w = self.e4e_inversion_net(new_image.unsqueeze(0), randomize_noise=False, return_latents=True, resize=False,
                                         input_code=False)
         return w
-
+        
+import os
 if __name__ == "__main__":
     e4e = e4e_inversion_module()
-    w_vectors = None
-    # for i in tqdm.trange(10000):
-    for i in tqdm.trange(2306):
+    
+    data_path = '../../AffectNet/train_set/'
+    inx = np.load(data_path+'index.npy')
+    img_path = data_path + 'images/'
+    if False and os.path.exists(data_path + 'e4e_w_plus.npy'):
+        w_vectors = np.load(data_path+'e4e_w_plus.npy')
+    else:
+        w_vectors = None
+
+    for ti in tqdm.trange(0,30000):
         # img = e4e.load_image(f'rand_data/imgs/{i:0>5}.jpg')
-        img = e4e.load_image(f'data_crop/yukun_2/{i:0>4}.jpeg')
+        i = inx[ti]
+        img = e4e.load_image(img_path + f'{i}.jpg')
         w = e4e.get_inversion(img)
-        w = w.detach().cpu().numpy()
+        w = w.detach().cpu().numpy().astype(np.float32)
         if w_vectors is None:
             w_vectors = w
         else:
             w_vectors = np.concatenate([w_vectors, w], axis=0)
     print(w_vectors.shape)
     # np.save('rand_data/w_plus_vectors.npy', w_vectors)
-    np.save('PCA_analysis/yukun_2/w_plus.npy', w_vectors)
+    np.save(data_path + 'e4e_w_plus.npy', w_vectors)

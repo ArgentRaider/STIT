@@ -2,17 +2,17 @@ import torch
 from torch import nn
 from training.networks import FullyConnectedLayer
 
-class mlp_18(nn.Module):
-    def __init__(self):
-        super(mlp_18, self).__init__()
+class mlp_multichannel(nn.Module):
+    def __init__(self, channel_num=18):
+        super(mlp_multichannel, self).__init__()
 
         self.activation = 'lrelu'
-        self.channel_num = 18
+        self.channel_num = channel_num
         # self.channel_fc_dim = [512, 128, 32, 8]
-        self.channel_fc_dim = [512, 128, 64, 32, 8]
+        self.channel_fc_dim = [512, 512, 512, 512, 512]
 
         # self.fc_dim = [ self.channel_num*self.channel_fc_dim[-1], 72, 50]
-        self.fc_dim = [ self.channel_num*self.channel_fc_dim[-1], 72, 50, 50]
+        self.fc_dim = [ self.channel_num*self.channel_fc_dim[-1], 512, 512, 512, 512, 50, 50]
         self.output_dim = 50
 
         for ci in range(self.channel_num):

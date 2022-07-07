@@ -31,6 +31,7 @@ from utils.morphology import dilation
 @click.option('-rs', '--run_name_src', type=str, required=True)
 @click.option('-rd', '--run_name_dst', type=str, required=True)
 @click.option('-o', '--output_path', type=str, required=True)
+@click.option('-en', '--edit_name', type=str, default=None, multiple=True)
 @click.option('-ot', '--origin_type', type=str, required=True)
 @click.option('--edit_layers_start', type=int, default=0)
 @click.option('--edit_layers_end', type=int, default=18)
@@ -38,7 +39,7 @@ from utils.morphology import dilation
 @click.option('--min_exp_weight_path_dst', type=str, default=None)
 
 
-def _main(run_name_src, run_name_dst, output_path, origin_type, edit_layers_start, edit_layers_end, min_exp_weight_path_src, min_exp_weight_path_dst):
+def _main(run_name_src, run_name_dst, output_path, edit_name, origin_type, edit_layers_start, edit_layers_end, min_exp_weight_path_src, min_exp_weight_path_dst):
     image_size = 1024
     input_folder_src = f'data_crop/{run_name_src}'
     orig_files_src = make_dataset(input_folder_src)
@@ -84,7 +85,7 @@ def _main(run_name_src, run_name_dst, output_path, origin_type, edit_layers_star
         weight_dst = np.load(min_exp_weight_path_dst)['weight']
         origin_pivot_type['dst_weight'] = weight_dst
     
-    edits, is_style_input = latent_editor.get_transfer_edits(pivots_src, [pivots_dst], edit_layers_start, edit_layers_end, origin_pivot_type)
+    edits, is_style_input = latent_editor.get_transfer_edits(pivots_src, [pivots_dst], edit_name, edit_layers_start, edit_layers_end, origin_pivot_type)
 
     for edits_list, direction, factor in edits:
         for i in \

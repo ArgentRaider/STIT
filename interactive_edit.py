@@ -29,19 +29,20 @@ from utils.morphology import dilation
 
 from UI import UI
 
+EXPORT_FORMAT = "IMAGE"
+
 @click.command()
 @click.option('-r', '--run_name', type=str, required=True)
-@click.option('-en', '--edit_name', type=str, default=None, multiple=True)
+@click.option('-en', '--edit_name', type=str, required=True)
 @click.option('--edit_layers_start', type=int, default=0)
 @click.option('--edit_layers_end', type=int, default=18)
 
-
 def _main(run_name, edit_name, edit_layers_start, edit_layers_end):
     image_size = 1024
-    input_folder = f'data/{run_name}'
-    orig_files = make_dataset(input_folder)
-    segmentation_model = models.seg_model_2.BiSeNet(19).eval().cuda().requires_grad_(False)
-    segmentation_model.load_state_dict(torch.load(paths_config.segmentation_model_path))
+    # input_folder = f'data/{run_name}'
+    # orig_files = make_dataset(input_folder)
+    # segmentation_model = models.seg_model_2.BiSeNet(19).eval().cuda().requires_grad_(False)
+    # segmentation_model.load_state_dict(torch.load(paths_config.segmentation_model_path))
 
     gen, orig_gen, pivots, quads = load_generators(run_name)
     ## The unedited images could be pre-generated, yet they consume too much memory...
@@ -50,21 +51,24 @@ def _main(run_name, edit_name, edit_layers_start, edit_layers_end):
     #     gen_image = gen.synthesis(pivots[fi][None], noise_mode='const', force_fp32=True)
     #     gen_images.append(tensor2pil(gen_image))
 
-    crops, orig_images = crop_faces_by_quads(image_size, orig_files, quads)
+    # crops, orig_images = crop_faces_by_quads(image_size, orig_files, quads)
 
     latent_editor = LatentEditor()
-    ui = UI(windowName=f'Amplification-{run_name}')
+    ui = UI(windowName=f'{edit_name}-{run_name}')
+    edit_name = [edit_name]
 
     fi = 0
     scale = 1
     is_playing = False
-    orig_pivot_type = {'type': 'first'}
     window_should_close = False
+    status_changed = True
     while not window_should_close:
         # print(fi)
         
-        edit_range = (scale,scale,1)
-        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_name, edit_range, edit_layers_start, edit_layers_end, orig_pivot_type)
+        if status_changed:
+            edit_range = (scale,scale,1)
+            edits, is_style_input = latent_editor.get_interfacegan_edits(pivots, edit_name, edit_range, edit_layers_start, edit_layers_end)
+            status_changed = False
 
         edits_list, direction, factor = edits[0]
 
@@ -86,10 +90,8 @@ def _main(run_name, edit_name, edit_layers_start, edit_layers_end):
         textList = []
         textList.append(f'Frame: {fi}')
         textList.append(f'Scale: {scale}')
-        if not len(edit_name) == 0:
-            textList.append(f'Edit Direction: {edit_name[0]}')
         textList.append(f'Edit Layers: {edit_layers_start}-{edit_layers_end}')
-        textList.append(f'Orig Pivot Type: {orig_pivot_type["type"]}')
+
 
         ui.display(textList, orig_image, edited_image)
 
@@ -115,49 +117,54 @@ def _main(run_name, edit_name, edit_layers_start, edit_layers_end):
                 fi = len(pivots) - 1
         elif ret == 113: # 'q'
             scale -= 0.1
+            status_changed = True
         elif ret == 101: # 'e'
             scale += 0.1
+            status_changed = True
         elif ret == 97:  # 'a'
-            edit_layers_start -= 1
-            if edit_layers_start < 0:
-                edit_layers_start = 0
+            if edit_layers_start > 0:
+                edit_layers_start -= 1
+                status_changed = True
         elif ret == 100: # 'd'
-            edit_layers_start += 1
-            if edit_layers_start >= edit_layers_end:
-                edit_layers_start = edit_layers_end - 1
+            if edit_layers_start < edit_layers_end - 1:
+                edit_layers_start += 1
+                status_changed = True
         elif ret == 115: # 's'
-            edit_layers_end -= 1
-            if edit_layers_end <= edit_layers_start:
-                edit_layers_end = edit_layers_start + 1
+            if edit_layers_end > edit_layers_start + 1:
+                edit_layers_end -= 1
+                status_changed = True
         elif ret == 119: # 'w'
-            edit_layers_end += 1
-            if edit_layers_end > 18:
-                edit_layers_end = 18
-        elif ret == 99:  # 'c'
-            if orig_pivot_type['type'] == 'first':
-                orig_pivot_type['type'] = 'mean'
-            else:
-                orig_pivot_type['type'] = 'first'
+            if edit_layers_end < 18:
+                edit_layers_end += 1
+                status_changed = True
+        
         elif ret == 112: # 'p' export video
-            # maybe I should also write the config to a json file or something
-            export_path = 'export_videos/'
-            export_name = f'amplification_{run_name}_{scale:.1f}_{orig_pivot_type["type"]}_{edit_name}_{edit_layers_start}-{edit_layers_end}.mp4'
-            if not os.path.exists(export_path):
-                os.makedirs(export_path)
-            
-            frames = []
-            for fj in tqdm(range(len(pivots))):
-                orig_frame = tensor2pil( gen.synthesis(pivots[fj][None], noise_mode='const', force_fp32=True) )
-                # orig_frame = crops[fj]
-                edited_frame = tensor2pil( gen.synthesis.forward(edits_list[fj][None], style_input=False, noise_mode='const', force_fp32=True) )
-                orig_frame = orig_frame.resize((512, 512))
-                edited_frame = edited_frame.resize((512, 512))
-                new_frame = Image.new(orig_frame.mode, (1024, 512))
-                new_frame.paste(orig_frame, (0, 0))
-                new_frame.paste(edited_frame, (512, 0))
-                frames.append(new_frame)
-            imageio.mimwrite(os.path.join(export_path, export_name), frames, fps=2, output_params=['-vf', 'fps=2'])
-            print("Video exported to", os.path.join(export_path, export_name))
+            if EXPORT_FORMAT == "VIDEO":
+                export_path = 'export_videos/'
+                export_name = f'{edit_name[0]}_{run_name}_{scale}.mp4'
+                os.makedirs(export_path, exist_ok=True)
+                
+                frames = []
+                for fj in tqdm(range(len(pivots))):
+                    orig_frame = tensor2pil( gen.synthesis(pivots[fj][None], noise_mode='const', force_fp32=True) )
+                    edited_frame = tensor2pil( gen.synthesis.forward(edits_list[fj][None], style_input=False, noise_mode='const', force_fp32=True) )
+                    orig_frame = orig_frame.resize((512, 512))
+                    edited_frame = edited_frame.resize((512, 512))
+                    new_frame = Image.new(orig_frame.mode, (1024, 512))
+                    new_frame.paste(orig_frame, (0, 0))
+                    new_frame.paste(edited_frame, (512, 0))
+                    frames.append(new_frame)
+                imageio.mimwrite(os.path.join(export_path, export_name), frames, fps=25, output_params=['-vf', 'fps=25'])
+                print("Video exported to", os.path.join(export_path, export_name))
+            elif EXPORT_FORMAT == "IMAGE":
+                export_path = 'export_images/'
+                export_name = f'{edit_name[0]}_{run_name}_{scale}/'
+                os.makedirs(export_path+export_name, exist_ok=True)
+
+                for fj in tqdm(range(len(pivots))):
+                    edited_frame = tensor2pil( gen.synthesis.forward(edits_list[fj][None], style_input=False, noise_mode='const', force_fp32=True) )
+                    imageio.imwrite(export_path+export_name+f'{fj:0>4}.jpg', edited_frame)
+                print("Images exported to", export_path+export_name)
 
         if is_playing: # inactive feature for now
             fi += 1

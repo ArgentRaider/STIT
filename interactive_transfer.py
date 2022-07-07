@@ -32,11 +32,12 @@ from UI import UI
 @click.command()
 @click.option('-rs', '--run_name_src', type=str, required=True)
 @click.option('-rd', '--run_name_dst', type=str, required=True)
+@click.option('-en', '--edit_name', type=str, default=None, multiple=True)
 @click.option('--edit_layers_start', type=int, default=0)
 @click.option('--edit_layers_end', type=int, default=18)
 
 
-def _main(run_name_src, run_name_dst, edit_layers_start, edit_layers_end):
+def _main(run_name_src, run_name_dst, edit_name, edit_layers_start, edit_layers_end):
     image_size = 1024
     input_folder_src = f'data/{run_name_src}'
     orig_files_src = make_dataset(input_folder_src)
@@ -46,21 +47,21 @@ def _main(run_name_src, run_name_dst, edit_layers_start, edit_layers_end):
     segmentation_model.load_state_dict(torch.load(paths_config.segmentation_model_path))
 
     gen_src, _, pivots_src, quads_src = load_generators(run_name_src)
-    crops_src, orig_images_src = crop_faces_by_quads(image_size, orig_files_src, quads_src)
+    # crops_src, orig_images_src = crop_faces_by_quads(image_size, orig_files_src, quads_src)
     gen_dst, _, pivots_dst, quads_dst = load_generators(run_name_dst)
-    crops_dst, orig_images_dst = crop_faces_by_quads(image_size, orig_files_dst, quads_dst)
+    # crops_dst, orig_images_dst = crop_faces_by_quads(image_size, orig_files_dst, quads_dst)
 
     latent_editor = LatentEditor()
     ui = UI(windowName=f'Transfer-{run_name_src}-{run_name_dst}')
 
     fi = 0
     is_playing = False
-    use_mean = False
+    orig_pivot_type = {'type': 'mean'}
     window_should_close = False
     while not window_should_close:
         # print(fi)
         
-        edits, is_style_input = latent_editor.get_transfer_edits(pivots_src, [pivots_dst], edit_layers_start, edit_layers_end, use_mean)
+        edits, is_style_input = latent_editor.get_transfer_edits(pivots_src, [pivots_dst], edit_name, edit_layers_start, edit_layers_end, orig_pivot_type)
 
         edits_list, direction, factor = edits[0]
 
@@ -80,11 +81,10 @@ def _main(run_name_src, run_name_dst, edit_layers_start, edit_layers_end):
 
         textList = []
         textList.append(f'Frame: {fi}')
+        if not len(edit_name) == 0:
+            textList.append(f'Edit Direction: {edit_name[0]}')
         textList.append(f'Edit Layers: {edit_layers_start}-{edit_layers_end}')
-        if not use_mean:
-            textList.append('First or Mean: First')
-        else:
-            textList.append('First or Mean: Mean')
+        textList.append(f'Orig Pivot Type: {orig_pivot_type["type"]}')
 
         ui.display(textList, src_image, transferred_image)
 
@@ -125,11 +125,17 @@ def _main(run_name_src, run_name_dst, edit_layers_start, edit_layers_end):
             if edit_layers_end > 18:
                 edit_layers_end = 18
         elif ret == 99:  # 'c'
-            use_mean = not use_mean
+            if orig_pivot_type['type'] == 'first':
+                orig_pivot_type['type'] = 'mean'
+            else:
+                orig_pivot_type['type'] = 'first'
         elif ret == 112: # 'p' export video
             # maybe I should also write the config to a json file or something
             export_path = 'export_videos/'
-            export_name = f'transfer_{run_name_src}_{run_name_dst}.mp4'
+            if len(edit_name) == 0:
+                export_name = f'transfer_{run_name_src}_{run_name_dst}.mp4'
+            else:
+                export_name = f'transfer_{run_name_src}_{run_name_dst}_{edit_name[0]}.mp4'
             if not os.path.exists(export_path):
                 os.makedirs(export_path)
             

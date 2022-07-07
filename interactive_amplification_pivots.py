@@ -17,43 +17,47 @@ from tqdm import tqdm, trange
 import cv2
 
 import models.seg_model_2
-from configs import hyperparameters, paths_config
+from configs import global_config, hyperparameters, paths_config
 from edit_video import save_image
 from editings.latent_editor import LatentEditor
 from utils.alignment import crop_faces_by_quads, calc_alignment_coefficients
 from utils.data_utils import make_dataset
 from utils.edit_utils import add_texts_to_image_vertical, paste_image, paste_image_mask
 from utils.image_utils import concat_images_horizontally, tensor2pil
-from utils.models_utils import load_generators
+from utils.models_utils import load_generators, load_old_G, load_from_pkl_model
 from utils.morphology import dilation
 
 from UI import UI
 
 @click.command()
-@click.option('-r', '--run_name', type=str, required=True)
+@click.option('-pn', '--pivots_name', type=str)
 @click.option('-en', '--edit_name', type=str, default=None, multiple=True)
 @click.option('--edit_layers_start', type=int, default=0)
 @click.option('--edit_layers_end', type=int, default=18)
 
 
-def _main(run_name, edit_name, edit_layers_start, edit_layers_end):
+def _main(pivots_name, edit_name, edit_layers_start, edit_layers_end):
     image_size = 1024
-    input_folder = f'data/{run_name}'
-    orig_files = make_dataset(input_folder)
-    segmentation_model = models.seg_model_2.BiSeNet(19).eval().cuda().requires_grad_(False)
-    segmentation_model.load_state_dict(torch.load(paths_config.segmentation_model_path))
+    # input_folder = f'data/{run_name}'
+    # orig_files = make_dataset(input_folder)
+    # segmentation_model = models.seg_model_2.BiSeNet(19).eval().cuda().requires_grad_(False)
+    # segmentation_model.load_state_dict(torch.load(paths_config.segmentation_model_path))
 
-    gen, orig_gen, pivots, quads = load_generators(run_name)
+    # gen, orig_gen, pivots, quads = load_generators('yukun_happy_anger')
+    gen = load_from_pkl_model( load_old_G() )
+    pivots = np.load(f'w_vectors/{pivots_name}.npy')
+    pivots = torch.Tensor(pivots).to(global_config.device)
+
     ## The unedited images could be pre-generated, yet they consume too much memory...
     # gen_images = []
     # for fi in range(len(pivots)):
     #     gen_image = gen.synthesis(pivots[fi][None], noise_mode='const', force_fp32=True)
     #     gen_images.append(tensor2pil(gen_image))
 
-    crops, orig_images = crop_faces_by_quads(image_size, orig_files, quads)
+    # crops, orig_images = crop_faces_by_quads(image_size, orig_files, quads)
 
     latent_editor = LatentEditor()
-    ui = UI(windowName=f'Amplification-{run_name}')
+    ui = UI(windowName=f'Amplification-{pivots_name}_{edit_name[0]}')
 
     fi = 0
     scale = 1
@@ -141,7 +145,7 @@ def _main(run_name, edit_name, edit_layers_start, edit_layers_end):
         elif ret == 112: # 'p' export video
             # maybe I should also write the config to a json file or something
             export_path = 'export_videos/'
-            export_name = f'amplification_{run_name}_{scale:.1f}_{orig_pivot_type["type"]}_{edit_name}_{edit_layers_start}-{edit_layers_end}.mp4'
+            export_name = f'amplification_{pivots_name}_{scale:.1f}_{orig_pivot_type["type"]}_{edit_name}_{edit_layers_start}-{edit_layers_end}.mp4'
             if not os.path.exists(export_path):
                 os.makedirs(export_path)
             
@@ -156,7 +160,7 @@ def _main(run_name, edit_name, edit_layers_start, edit_layers_end):
                 new_frame.paste(orig_frame, (0, 0))
                 new_frame.paste(edited_frame, (512, 0))
                 frames.append(new_frame)
-            imageio.mimwrite(os.path.join(export_path, export_name), frames, fps=2, output_params=['-vf', 'fps=2'])
+            imageio.mimwrite(os.path.join(export_path, export_name), frames, fps=18, output_params=['-vf', 'fps=18'])
             print("Video exported to", os.path.join(export_path, export_name))
 
         if is_playing: # inactive feature for now

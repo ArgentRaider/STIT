@@ -93,6 +93,7 @@ def calc_masks(inversion, segmentation_model, border_pixels, inner_mask_dilation
 @click.option('--neutral_class', default='face', type=str)
 @click.option('--target_class', default=None, type=str)
 @click.option('-en', '--edit_name', type=str, default=None, multiple=True)
+@click.option('-ot', '--origin_type', type=str, default=['mean'], multiple=True)
 @click.option('-er', '--edit_range', type=(float, float, int), nargs=3, default=(2, 20, 10))
 @click.option('--freeze_fine_layers', type=int, default=None)
 @click.option('--l2/--l1', type=bool, default=True)
@@ -111,7 +112,7 @@ def main(**config):
 
 
 def _main(input_folder, output_folder, start_frame, end_frame, run_name, input_crop,
-          edit_range, edit_type, edit_name, 
+          edit_range, edit_type, edit_name, origin_type,
         #   inner_mask_dilation, outer_mask_dilation, whole_image_border,
           freeze_fine_layers, l2, output_video, output_frames, num_steps, neutral_class, target_class,
           beta, config, content_loss_lambda, border_loss_threshold, save_latent, edit_layers_start, edit_layers_end,
@@ -156,21 +157,21 @@ def _main(input_folder, output_folder, start_frame, end_frame, run_name, input_c
             pivots, neutral_class, target_class, beta, edit_range, gen, edit_name
         )
     elif edit_type == 'amplification':
-        edit_name = edit_name[0]
-        if edit_name == 'mean':
+        origin_type = origin_type[0]
+        if origin_type == 'mean':
             origin_pivot_type={'type': 'mean'}
-        elif edit_name == 'first':
+        elif origin_type == 'first':
             origin_pivot_type={'type': 'first'}
-        elif edit_name == 'min':
+        elif origin_type == 'min':
             origin_pivot_type={'type': 'min'}
             min_index = np.load(min_exp_weight_path)['min_index']
             origin_pivot_type['min_index'] = min_index
-        elif edit_name == 'min_weight':
+        elif origin_type == 'min_weight':
             origin_pivot_type={'type': 'min_weight'}
             weight = np.load(min_exp_weight_path)['weight']
             origin_pivot_type['weight'] = weight
 
-        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_range, edit_layers_start, edit_layers_end, origin_pivot_type=origin_pivot_type)
+        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_name, edit_range, edit_layers_start, edit_layers_end, origin_pivot_type=origin_pivot_type)
     elif edit_type == 'amplification_with_pose':
         edit_name='amplification_with_pose'
         edits, is_style_input = latent_editor.get_amplification_edits_with_pose(pivots, edit_range, edit_layers_start)
