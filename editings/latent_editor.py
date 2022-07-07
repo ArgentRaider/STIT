@@ -13,7 +13,7 @@ class LatentEditor:
         interfacegan_directions = {
             os.path.splitext(file)[0]: np.load(os.path.join(interfacegan_folder, file), allow_pickle=True)
             for file in os.listdir(interfacegan_folder) if file.endswith('.npy')}
-        self.interfacegan_directions_tensors = {name: torch.from_numpy(arr).cuda()[0, None]
+        self.interfacegan_directions_tensors = {name: torch.from_numpy(arr).cuda()
                                                 for name, arr in interfacegan_directions.items()}
 
 
@@ -122,7 +122,7 @@ class LatentEditor:
             edit_latents = torch.cat(edit_latents)
         else:
             edit_latents = latent.clone()
-            edit_latents[:, edit_layers_start:edit_layers_end] += factor * direction
+            edit_latents[:, edit_layers_start:edit_layers_end] += factor * direction[edit_layers_start:edit_layers_end]
         return edit_latents
 
     @staticmethod
