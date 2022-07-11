@@ -35,13 +35,14 @@ class LatentEditor:
         if len(edit_names) == 0 or not edit_names[0] in self.interfacegan_directions_tensors.keys():
             direction = None
         else:
-            direction = self.interfacegan_directions_tensors[edit_names[0]].float().clone()
+            direction = self.interfacegan_directions_tensors[edit_names[0]].float().clone()  # [18, 512]
             for i in range(direction.shape[0]):
                 direction[i] /= torch.norm(direction[i], 2).item()
 
         yaw = self.interfacegan_directions_tensors['yaw'][0].float()
         pitch = self.interfacegan_directions_tensors['pitch'][0].float()
         yaw /= torch.norm(yaw, 2)
+        pitch -= torch.dot(pitch, yaw) * yaw
         pitch /= torch.norm(pitch, 2)
         for factor in np.linspace(*edit_range):
             w_edit = self._apply_amplification(orig_w, direction, factor, yaw=yaw, pitch=pitch, edit_layers_start=edit_layers_start, edit_layers_end=edit_layers_end, origin_pivot_type=origin_pivot_type)
@@ -151,8 +152,8 @@ class LatentEditor:
 
         if not direction is None:
             for i in range(direction.shape[0]):
-                direction_2d = direction[i].reshape(direction[i].shape[0], 1)
-                dist[i] = torch.matmul(dist[i], direction_2d) * direction[i]
+                direction_2d = direction[i].reshape(direction[i].shape[0], 1) # direction_2d -> [512, 1]
+                dist[:, i] = torch.trunc(torch.matmul(dist[:, i], direction_2d)) * direction[i] # dist[:, i] -> [frame_num, 1, 512]
 
         edit_latents = latent.clone()
         edit_latents[:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]

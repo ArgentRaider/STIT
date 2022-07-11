@@ -60,7 +60,7 @@ def _main(pivots_name, edit_name, edit_layers_start, edit_layers_end):
     ui = UI(windowName=f'Amplification-{pivots_name}_{edit_name[0]}')
 
     fi = 0
-    scale = 1
+    scale = 10
     is_playing = False
     orig_pivot_type = {'type': 'first'}
     window_should_close = False
@@ -145,7 +145,7 @@ def _main(pivots_name, edit_name, edit_layers_start, edit_layers_end):
         elif ret == 112: # 'p' export video
             # maybe I should also write the config to a json file or something
             export_path = 'export_videos/'
-            export_name = f'amplification_{pivots_name}_{scale:.1f}_{orig_pivot_type["type"]}_{edit_name}_{edit_layers_start}-{edit_layers_end}.mp4'
+            export_name = f'amplification_{pivots_name}_{scale:.1f}_{orig_pivot_type["type"]}_{edit_name[0]}_{edit_layers_start}-{edit_layers_end}.mp4'
             if not os.path.exists(export_path):
                 os.makedirs(export_path)
             
