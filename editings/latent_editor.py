@@ -1,9 +1,10 @@
 import os.path
+import pickle
 
 import numpy as np
 import torch
 
-from configs.paths_config import interfacegan_folder
+from configs.paths_config import interfacegan_folder, stylespace_folder
 from editings import styleclip_global_utils
 from utils.edit_utils import get_affine_layers, load_stylespace_std, to_styles, w_to_styles
 
@@ -13,6 +14,7 @@ class LatentEditor:
         interfacegan_directions = {
             os.path.splitext(file)[0]: np.load(os.path.join(interfacegan_folder, file), allow_pickle=True)
             for file in os.listdir(interfacegan_folder) if file.endswith('.npy')}
+
         self.interfacegan_directions_tensors = {name: torch.from_numpy(arr).cuda()
                                                 for name, arr in interfacegan_directions.items()}
 
@@ -52,6 +54,29 @@ class LatentEditor:
                 edits.append((w_edit, f'amplification_{edit_names[0]}_{edit_layers_start}_{edit_layers_end}_{factor}', factor))
 
         return edits, False
+
+    def get_style_clip_amplification_edits(self, orig_w, edit_names, edit_range, generator, neutral_class='face', origin_pivot_type={'type': 'first'}, 
+                                            beta=0.1, use_stylespace_std=False):
+        affine_layers = get_affine_layers(generator.synthesis)
+        edit_directions = styleclip_global_utils.get_direction(neutral_class, edit_names[0], beta)
+        if edit_names is None:
+            edit = None
+        elif use_stylespace_std:
+            s_std = load_stylespace_std()
+            edit_directions = to_styles(edit_directions, affine_layers)
+            edit = [(s * std).float() for s, std in zip(edit_directions, s_std)]
+        else:
+            edit = to_styles(edit_directions, affine_layers)
+            edit = [edit_i.float() for edit_i in edit]
+
+        factors = np.linspace(*edit_range)
+        styles = w_to_styles(orig_w, affine_layers)
+        final_edits = []
+
+        for factor in factors:
+            edited_styles = self._apply_amplification_style(orig_w, affine_layers, edit, factor, origin_pivot_type)
+            final_edits.append((edited_styles, edit_names[0], f'{factor}_{beta}'))
+        return final_edits, True
     
     def get_transfer_edits(self, transfer_src_w, transfer_dst_w_list, edit_names, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
         assert(type(origin_pivot_type) == dict and origin_pivot_type.get('type') in ['first', 'mean', 'min', 'min_weight'])
@@ -153,12 +178,49 @@ class LatentEditor:
         if not direction is None:
             for i in range(direction.shape[0]):
                 direction_2d = direction[i].reshape(direction[i].shape[0], 1) # direction_2d -> [512, 1]
-                dist[:, i] = torch.trunc(torch.matmul(dist[:, i], direction_2d)) * direction[i] # dist[:, i] -> [frame_num, 1, 512]
+                dist[:, i] = torch.matmul(dist[:, i], direction_2d) * direction[i] # dist[:, i] -> [frame_num, 1, 512]
 
         edit_latents = latent.clone()
         edit_latents[:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
 
         return edit_latents
+    
+    @staticmethod
+    def _apply_amplification_style(latent, affine_layers, style_direction=None, factor=2, origin_pivot_type={'type': 'first'}):
+        if origin_pivot_type['type'] == 'mean':
+            origin = latent.mean(0).unsqueeze(0)
+        elif origin_pivot_type['type'] == 'first':
+            origin = latent[0, None]
+        elif origin_pivot_type['type'] == 'min':
+            min_index = origin_pivot_type['min_index']
+            origin = latent[min_index, None]
+        elif origin_pivot_type['type'] == 'min_weight':
+            weight = origin_pivot_type['weight']
+            origin = torch.zeros([latent.shape[1], latent.shape[2]]).float().cuda()
+            for i in range(len(weight)):
+                origin += weight[i] * latent[i]
+            origin.unsqueeze(0)
+        
+        styles = w_to_styles(latent, affine_layers)
+        styles_origin = w_to_styles(origin, affine_layers)
+        
+        edit_styles = []
+        for i in range(len(styles)):
+            edit_style_i = styles[i].clone()    # styles[i] -> [frame_num, style_dim]
+            dist = styles[i] - styles_origin[i] # styles_origin[i] -> [1, style_dim], dist -> [frame_num, style_dim]
+
+            if not style_direction is None:
+                length = torch.norm(style_direction[i], 2)
+                if length < 1e-4:
+                    dist = 0
+                else:
+                    style_direction[i] /= length
+                    style_direction_2d = style_direction[i].reshape(-1, 1) # style_direction_2d -> [style_dim, 1]
+                    dist = torch.matmul(dist, style_direction_2d) * style_direction[i]
+
+            edit_style_i += (factor - 1) * dist
+            edit_styles.append(edit_style_i)
+        return edit_styles
 
     @staticmethod
     def _apply_amplification_with_pose(latent, factor=2, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):

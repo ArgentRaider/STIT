@@ -11,6 +11,7 @@ pti_results_keyword = 'STIT'
 
 ## Edit directions
 interfacegan_folder = 'editings/w_directions/'
+stylespace_folder = 'editings/style_directions/'
 styleclip_fs3 = 'editings/styleclip_global/fs3.npy'
 
 stylespace_mean_std = 'editings/styleclip_global/S_mean_std'
