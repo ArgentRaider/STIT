@@ -15,7 +15,7 @@ from utils.models_utils import load_generators, load_old_G, load_from_pkl_model
 from editings import styleclip_global_utils
 from utils.edit_utils import get_affine_layers, load_stylespace_std, to_styles, w_to_styles
 
-def test_style_directions(orig_w, direction_name, generator):
+def visualize_style_directions(orig_w, direction_name, generator):
     neutral_class = 'face'
     target_class = direction_name
     beta = 0.1
@@ -51,7 +51,7 @@ def _main():
     neutral_pivots_cuda = torch.from_numpy(neutral_pivots_np).cuda()
     orig_w = neutral_pivots_cuda[0][None]
 
-    test_style_directions(orig_w, 'happy', generator)
+    visualize_style_directions(orig_w, 'happy', generator)
 
 if __name__ == "__main__":
     _main()

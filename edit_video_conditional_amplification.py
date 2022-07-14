@@ -19,6 +19,7 @@ import models.seg_model_2
 from configs import global_config, hyperparameters, paths_config
 from edit_video import save_image
 from editings.latent_editor import LatentEditor
+from editings.conditional_latent_editor import ConditionalLatentEditor
 from utils.alignment import crop_faces_by_quads, calc_alignment_coefficients
 from utils.data_utils import make_dataset
 from utils.edit_utils import add_texts_to_image_vertical, paste_image, paste_image_mask
@@ -30,6 +31,7 @@ from utils.models_utils import load_generators, load_old_G, load_from_pkl_model
 @click.option('-r', '--run_name', type=str, default=None)
 @click.option('-p', '--pivots_path', type=str, default=None)
 @click.option('-en', '--edit_name', type=str, default=None, multiple=True)
+@click.option('-cn', '--condition_name', type=str, default=None)
 @click.option('-s', '--scale', type=float, default=1.5)
 @click.option('--style_clip', type=bool, default=False)
 @click.option('--beta', type=float, default=0.1)
@@ -38,7 +40,8 @@ from utils.models_utils import load_generators, load_old_G, load_from_pkl_model
 @click.option('--orig_pivot_type', type=str, default='first')
 
 
-def _main(run_name, pivots_path, edit_name, scale, style_clip, beta, edit_layers_start, edit_layers_end, orig_pivot_type):
+def _main(run_name, pivots_path, edit_name, condition_name, scale, style_clip, beta, edit_layers_start, edit_layers_end, orig_pivot_type):
+
     if not run_name is None:
         gen, orig_gen, pivots, quads = load_generators(run_name)
     elif not pivots_path is None:
@@ -55,23 +58,25 @@ def _main(run_name, pivots_path, edit_name, scale, style_clip, beta, edit_layers
         return
 
 
-    latent_editor = LatentEditor()
+    latent_editor = ConditionalLatentEditor()
 
     orig_pivot_type = {'type': orig_pivot_type}
 
         
     edit_range = (scale,scale,1)
     if not style_clip:
-        edits, is_style_input = latent_editor.get_amplification_edits(pivots, edit_name, edit_range, edit_layers_start, edit_layers_end, orig_pivot_type)
+        edits, is_style_input = latent_editor.get_conditional_amplification_edits(pivots, edit_name, condition_name, edit_range, edit_layers_start, edit_layers_end, orig_pivot_type)
     else:
-        edits, is_style_input = latent_editor.get_style_clip_amplification_edits(pivots, edit_name, edit_range, gen, beta=beta, origin_pivot_type=orig_pivot_type)
+        edits, is_style_input = latent_editor.get_conditional_style_clip_amplification_edits(pivots, edit_name, condition_name, edit_range, gen, beta=beta, origin_pivot_type=orig_pivot_type)
 
     edits_list, direction, factor = edits[0]
 
     export_path = 'export_videos/'
     if not edit_name is None:
-        if style_clip:
+        if style_clip :
             edit_name = 'style_' + edit_name[0]
+            if not condition_name is None:
+                edit_name += '_cond_' + condition_name
         else:
             edit_name = edit_name[0]
     export_name = f'amplification_{run_name}_{scale:.1f}_{orig_pivot_type["type"]}_{edit_name}_{edit_layers_start}-{edit_layers_end}.mp4'

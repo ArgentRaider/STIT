@@ -58,16 +58,18 @@ class LatentEditor:
     def get_style_clip_amplification_edits(self, orig_w, edit_names, edit_range, generator, neutral_class='face', origin_pivot_type={'type': 'first'}, 
                                             beta=0.1, use_stylespace_std=False):
         affine_layers = get_affine_layers(generator.synthesis)
-        edit_directions = styleclip_global_utils.get_direction(neutral_class, edit_names[0], beta)
         if edit_names is None:
             edit = None
-        elif use_stylespace_std:
-            s_std = load_stylespace_std()
-            edit_directions = to_styles(edit_directions, affine_layers)
-            edit = [(s * std).float() for s, std in zip(edit_directions, s_std)]
         else:
-            edit = to_styles(edit_directions, affine_layers)
-            edit = [edit_i.float() for edit_i in edit]
+            edit_directions = styleclip_global_utils.get_direction(neutral_class, edit_names[0], beta)
+            
+            if use_stylespace_std:
+                s_std = load_stylespace_std()
+                edit_directions = to_styles(edit_directions, affine_layers)
+                edit = [(s * std).float() for s, std in zip(edit_directions, s_std)]
+            else:
+                edit = to_styles(edit_directions, affine_layers)
+                edit = [edit_i.float() for edit_i in edit]
 
         factors = np.linspace(*edit_range)
         styles = w_to_styles(orig_w, affine_layers)
@@ -216,7 +218,7 @@ class LatentEditor:
                 else:
                     style_direction[i] /= length
                     style_direction_2d = style_direction[i].reshape(-1, 1) # style_direction_2d -> [style_dim, 1]
-                    dist = torch.matmul(dist, style_direction_2d) * style_direction[i]
+                    dist = torch.clamp(torch.matmul(dist, style_direction_2d), min=0) * style_direction[i]
 
             edit_style_i += (factor - 1) * dist
             edit_styles.append(edit_style_i)
