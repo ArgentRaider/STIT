@@ -154,7 +154,8 @@ class LatentEditor:
         return edit_latents
 
     @staticmethod
-    def _apply_amplification(latent, direction=None, factor=2, yaw=None, pitch=None, edit_layers_start=None, edit_layers_end=None, origin_pivot_type={'type': 'first'}):
+    def _apply_amplification(latent, direction=None, factor=2, yaw=None, pitch=None, edit_layers_start=None, edit_layers_end=None, 
+                            origin_pivot_type={'type': 'first'}, clamp=False):
         if origin_pivot_type['type'] == 'mean':
             origin = latent.mean(0).unsqueeze(0)
         elif origin_pivot_type['type'] == 'first':
@@ -180,7 +181,10 @@ class LatentEditor:
         if not direction is None:
             for i in range(direction.shape[0]):
                 direction_2d = direction[i].reshape(direction[i].shape[0], 1) # direction_2d -> [512, 1]
-                dist[:, i] = torch.matmul(dist[:, i], direction_2d) * direction[i] # dist[:, i] -> [frame_num, 1, 512]
+                if clamp:
+                    dist[:, i] = torch.clamp(torch.matmul(dist[:, i], direction_2d), min=0) * direction[i] # dist[:, i] -> [frame_num, 1, 512]
+                else:
+                    dist[:, i] = torch.matmul(dist[:, i], direction_2d) * direction[i] # dist[:, i] -> [frame_num, 1, 512]
 
         edit_latents = latent.clone()
         edit_latents[:, edit_layers_start:edit_layers_end] += (factor - 1) * dist[:, edit_layers_start:edit_layers_end]
@@ -188,7 +192,7 @@ class LatentEditor:
         return edit_latents
     
     @staticmethod
-    def _apply_amplification_style(latent, affine_layers, style_direction=None, factor=2, origin_pivot_type={'type': 'first'}):
+    def _apply_amplification_style(latent, affine_layers, style_direction=None, factor=2, origin_pivot_type={'type': 'first'}, clamp=False):
         if origin_pivot_type['type'] == 'mean':
             origin = latent.mean(0).unsqueeze(0)
         elif origin_pivot_type['type'] == 'first':
@@ -218,7 +222,10 @@ class LatentEditor:
                 else:
                     style_direction[i] /= length
                     style_direction_2d = style_direction[i].reshape(-1, 1) # style_direction_2d -> [style_dim, 1]
-                    dist = torch.clamp(torch.matmul(dist, style_direction_2d), min=0) * style_direction[i]
+                    if clamp:
+                        dist = torch.clamp(torch.matmul(dist, style_direction_2d), min=0) * style_direction[i]
+                    else:
+                        dist = torch.matmul(dist, style_direction_2d) * style_direction[i]
 
             edit_style_i += (factor - 1) * dist
             edit_styles.append(edit_style_i)

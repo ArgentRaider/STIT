@@ -155,6 +155,7 @@ cython_debug/
 .idea
 
 # data
+*.mp4
 data/
 data_crop/
 training_results/

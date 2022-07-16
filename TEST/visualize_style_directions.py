@@ -18,7 +18,7 @@ from utils.edit_utils import get_affine_layers, load_stylespace_std, to_styles, 
 def visualize_style_directions(orig_w, direction_name, generator):
     neutral_class = 'face'
     target_class = direction_name
-    beta = 0.1
+    beta = 0.2
     affine_layers = get_affine_layers(generator.synthesis)
     edit_directions = styleclip_global_utils.get_direction(neutral_class, target_class, beta)
     edit = to_styles(edit_directions, affine_layers)
@@ -51,7 +51,7 @@ def _main():
     neutral_pivots_cuda = torch.from_numpy(neutral_pivots_np).cuda()
     orig_w = neutral_pivots_cuda[0][None]
 
-    visualize_style_directions(orig_w, 'happy', generator)
+    visualize_style_directions(orig_w, 'angry', generator)
 
 if __name__ == "__main__":
     _main()
